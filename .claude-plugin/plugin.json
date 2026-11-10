@@ -1,7 +1,7 @@
 {
   "name": "delta",
   "displayName": "Delta",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Record and share a DeepSeek Harness Session and its checkout through DeltaDB.",
   "author": {
     "name": "Zed Industries"
