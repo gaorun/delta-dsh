@@ -50,18 +50,21 @@ test('the person-facing Sessions are root and not Team teammates', () => {
   assert.equal(isUserFacingSession(undefined, undefined), false)
 })
 
-test('the band shows only for a Session connected to Delta', () => {
-  const base = { userFacing: true, progress: false, watchError: false }
-  // Never connected: no "not set up" reminder, no bar.
+test('the band shows only for a Session the person explicitly connected', () => {
+  const base = { userFacing: true, explicit: true, progress: false, watchError: false }
+  // Nothing to show before a Delta command connected it.
   assert.equal(bandShouldShow({ ...base, binding: undefined }), false)
-  // A local-only capture binding (snapshot) is not a connection.
-  assert.equal(bandShouldShow({ ...base, binding: { snapshot: true } }), false)
-  // Connected: shared, joined, joining, or synced.
+  assert.equal(bandShouldShow({ ...base, explicit: false, binding: { thread: 't' } }), false)
+  // A binding inherited from the old automatic sync is not enough.
+  assert.equal(bandShouldShow({ ...base, explicit: false, binding: { thread: 't', autoUpload: { mode: 'private' } } }), false)
+  // Explicitly connected: shared, joined, joining, or synced.
   for (const binding of [{ thread: 't' }, { joined: true }, { joinTransition: {} }, { autoUpload: { mode: 'private' } }])
     assert.equal(bandShouldShow({ ...base, binding }), true)
   // A Delta command in flight, or a connection it started that now fails, shows.
-  assert.equal(bandShouldShow({ ...base, binding: undefined, progress: true }), true)
-  assert.equal(bandShouldShow({ ...base, binding: undefined, watchError: true }), true)
+  assert.equal(bandShouldShow({ ...base, explicit: false, binding: undefined, progress: true }), true)
+  assert.equal(bandShouldShow({ ...base, explicit: false, binding: undefined, watchError: true }), true)
+  // A local-only capture binding is not a connection.
+  assert.equal(bandShouldShow({ ...base, binding: { snapshot: true } }), false)
   // Agent-internal Sessions never show it.
   assert.equal(bandShouldShow({ ...base, userFacing: false, binding: { thread: 't' } }), false)
 })

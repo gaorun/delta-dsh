@@ -70,11 +70,14 @@ so the port discriminates:
    and subagent children are never served: no Delta start, no questions, no
    status bar.
 2. **When the band shows.** Only for a Session the person explicitly connected to
-   Delta: it has a Delta thread from `/delta-share` or `/delta-join`, or a Delta
-   command is in flight, or such a connection is failing and needs attention.
-   A Session that was never set up — or that only has a local capture — shows no
-   bar at all: no "not set up" reminder, no "not syncing" nudge. `/delta-setup`
-   and `/delta-share` are always one command away in the composer menu.
+   Delta in this profile: after `/delta-share` or `/delta-join`, while one of
+   those commands is in flight, or when such a connection is failing and needs
+   attention. That choice is remembered next to the Session, so it survives a
+   restart; a binding inherited from the old automatic-sync behaviour does not
+   count. A Session that was never connected — or that only has a local capture —
+   shows no bar at all: no "not set up" reminder, no "not syncing" nudge.
+   `/delta-setup` and `/delta-share` are always one command away in the composer
+   menu.
 
 ## The band
 

@@ -68,21 +68,24 @@ export function isUserFacingSession(agent, membership) {
 }
 
 /**
- * Whether one Session shows the band: only a Session the person actually
- * connected to Delta does. A Session that was never set up, or that only holds
- * a local capture or a "not set up" reminder, stays quiet; `/delta-setup` and
- * `/delta-share` are one command away.
+ * Whether one Session shows the band: only a Session the person explicitly
+ * connected to Delta, or a Delta command that is running or failing right now.
+ *
+ * A binding inherited from the old automatic-sync behaviour is not enough: a
+ * Session nobody shared or joined in this process keeps its bar hidden, with no
+ * setup reminder and no connection of its own.
  *
  * @param options.userFacing the Session may be recorded and shown at all.
+ * @param options.explicit the person ran `/delta-share` or `/delta-join` for it.
  * @param options.binding its Delta binding, when it has one.
  * @param options.progress whether a share, join or installation update is running.
  * @param options.watchError whether its thread watch reports a failure.
  */
-export function bandShouldShow({ userFacing, binding, progress, watchError }) {
+export function bandShouldShow({ userFacing, explicit, binding, progress, watchError }) {
   if (!userFacing) return false
   // An explicit Delta command in flight, or a connection it started that now fails.
   if (progress || watchError) return true
+  if (!explicit) return false
   if (binding === undefined || binding === null) return false
-  // Only a Session the person connected to Delta: shared, joined, or synced.
   return Boolean(binding.thread || binding.joined || binding.joinTransition || binding.autoUpload)
 }

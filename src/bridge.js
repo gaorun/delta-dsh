@@ -119,6 +119,8 @@ export class Bridge {
     this.focusedSession = undefined
     /** The browser's active locale, for Delta's own question dialogs. */
     this.language = 'en'
+    /** Sessions the person explicitly connected to Delta in this profile. */
+    this.explicitSessions = new Map()
     try {
       this.packageVersionValue = JSON.parse(readFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version
     } catch {
@@ -345,6 +347,23 @@ export class Bridge {
     try { return await this.store.get(`session:${String(session.id)}`) } catch { return undefined }
   }
 
+  /** Whether the person explicitly connected this Session to Delta (share/join kept in the store). */
+  async isExplicit(sessionId) {
+    const cached = this.explicitSessions.get(sessionId)
+    if (cached !== undefined) return cached
+    let remembered = false
+    try { remembered = (await this.store.get(`explicit:${sessionId}`)) === true } catch {}
+    this.explicitSessions.set(sessionId, remembered)
+    return remembered
+  }
+
+  /** Remember that the person connected this Session to Delta on purpose. */
+  markExplicit(sessionId) {
+    if (this.explicitSessions.get(sessionId) === true) return
+    this.explicitSessions.set(sessionId, true)
+    void this.store.set(`explicit:${sessionId}`, true).catch(() => {})
+  }
+
   /** Whether Delta has something worth showing for this Session (see `visibility.js`). */
   async bandShouldShow(agent, session) {
     const userFacing = this.isUserFacing(agent)
@@ -353,8 +372,13 @@ export class Bridge {
     let watchError = false
     try { progress = reportedProgress() !== undefined } catch {}
     try { watchError = watchStatus()?.error !== undefined } catch {}
+    const sessionId = String(session.id)
+    // A share or join this Session runs proves the person asked for Delta here, even
+    // when it came from the /delta menu rather than a dedicated command.
+    if (progress && this.isFocused(sessionId)) this.markExplicit(sessionId)
     return bandShouldShow({
       userFacing,
+      explicit: await this.isExplicit(sessionId),
       binding: await this.bindingOf(session),
       progress,
       watchError,
@@ -546,6 +570,9 @@ export class Bridge {
     const handler = async (invocation) => {
       const dispatchContext = { agent: invocation.agent, session: invocation.agent.session, signal: invocation.signal }
       const rawInput = invocation.rawInput ?? ''
+      const connectAction = ['delta-share', 'delta-join', 'delta-setup'].includes(spec.name) ||
+        (spec.name === 'delta' && /^(share|join|setup)\b/.test(rawInput.trim()))
+      if (connectAction) this.markExplicit(String(invocation.agent.session.id))
       if (spec.name === 'delta-plugin-update' || (spec.name === 'delta' && /^plugin-update\b/.test(rawInput.trim()))) {
         const args = spec.name === 'delta' ? rawInput.trim().replace(/^plugin-update/, '').trim() : rawInput.trim()
         return { kind: 'success', text: await this.pluginUpdateResult(args) }
