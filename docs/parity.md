@@ -27,6 +27,7 @@
 | `/delta-update`（启动检查 + 显式更新 + band 进度） | Ported | vendored `cli/install-update.ts` 未改；进度经 `ui.status`/invalidate 到 band | 代码路径完成；Windows 分支未验证（第 3 节） |
 | `/delta-plugin-update` | Adapted | `src/bridge.js:376-395`、`417-420`、`478-481` 拦截为 Harness Plugin Manager 提示；notifications on/off 存 `delta-dsh:plugin-update:notifications`（`bridge.js:378-389`） | DSH 无插件市场 CLI/`/reload-plugins`，改为声明“由 Plugin Manager 安装/更新/重载” |
 | share/join 进行中拒绝 prompt（门禁） | Ported | `src/index.js:143-173`（`agent/pre-step` → `prompt.submit`；`drop` → `{kind:'reject'}` + 文案写 band status） | 文案保留；未 E2E |
+| 手动停止共享/停止同步 | 新增（上游无此命令） | `src/bridge.js` 的 `stopSharing`、`ensureCommands` 注册的 `/delta-stop` | 上游只有 `thread unshare`（改可见性、不停止录制）；本端口新增 `/delta-stop`：私有化自己的 thread（`delta thread unshare`）、停止 watch、清除 binding 与 explicit 标记、隐藏 band；本地已暂存 outbox 保留但不上传。加入的别人的 thread 只停止本地参与、不动对方 thread |
 | 会话结束清理（releaseOnEnd/mounts/band/命令） | Ported | `src/index.js:94-105`（`agent/disposed` → `session.end`，reason 固定 `other`） | 语义等价；join 的 mount 会在 dispose 时释放 |
 
 ### 1.2 band 与实时协作

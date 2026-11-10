@@ -149,6 +149,12 @@ test('the built Host half starts and ends a Session with Delta installed', async
     assert.equal(ctx.services.commands.defs.has('delta-plugin-update'), true)
     assert.equal(ctx.services.commands.defs.has('delta-org'), true)
 
+    // The port adds /delta-stop; with no Delta connection it says so.
+    assert.equal(ctx.services.commands.defs.has('delta-stop'), true)
+    const stop = await ctx.services.commands.execute(agent, '/delta-stop')
+    assert.equal(stop.result.kind, 'success')
+    assert.match(stop.result.text, /not connected to Delta/)
+
     // `/delta-plugin-update` is adapted to the Harness plugin manager.
     const update = await ctx.services.commands.execute(agent, '/delta-plugin-update check')
     assert.equal(update.result.kind, 'success')

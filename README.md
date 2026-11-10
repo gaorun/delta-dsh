@@ -36,6 +36,7 @@ setup offers to install it, as the Claude Code plugin does.
 | `/delta-setup` | Choose this repository's team and which sessions sync |
 | `/delta-update` | Update the installed Delta app and CLI |
 | `/delta-plugin-update [check \| notifications on\|off]` | Report this plugin's installation and how the Harness updates it |
+| `/delta-stop` | Stop sharing and syncing this Session (the port's addition; Delta has no such command) |
 | `/delta-org list\|current\|switch <ID>\|invite <email>…\|manage` | Manage your Delta team |
 
 Each command also works as `/delta <command>`, such as `/delta share`. Setup
@@ -47,6 +48,11 @@ Opening a Session never connects to Delta. The port does not start recording,
 does not contact the Delta CLI, does not offer setup and does not ask anyone to
 sign in until you run `/delta-setup`, `/delta-share` or `/delta-join`. The
 `/delta` command menu is always present.
+
+`/delta-stop` stops a Session that is already connected: it makes the
+Session's own thread private when this account owns it, stops the thread watch,
+forgets the binding, and hides the band. Records already staged locally stay in
+the outbox but are not uploaded; sharing it again with `/delta-share` resumes.
 
 That also means the automatic sync modes a repository's `.delta/settings.json`
 can name do not make new Sessions sync by themselves in this port: the file is

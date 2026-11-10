@@ -17,7 +17,8 @@ import { runProcess, spawnProcess } from './process.js'
 import { configDir, dataDir } from './paths.js'
 import { registerCommands } from '../vendor/delta/setup/commands.ts'
 import { reportedProgress } from '../vendor/delta/band/band.tsx'
-import { watchStatus, watchedSession } from '../vendor/delta/watch/watch.ts'
+import { watchStatus, watchedSession, stopConversation } from '../vendor/delta/watch/watch.ts'
+import { requests, stateFor } from '../vendor/delta/core/session-state.ts'
 import { activation, sessions as deltaSessions } from '../vendor/delta/core/session-state.ts'
 import { apiBlocks } from './rows.js'
 import { bandShouldShow, isUserFacingSession, repoPolicyConfigured } from './visibility.js'
@@ -556,6 +557,59 @@ export class Bridge {
   }
 
   /**
+   * Stop sharing and syncing one Session: make its thread private when this
+   * account owns it, stop its watcher, forget its binding and explicit
+   * connection so it stays quiet until the person shares it again. Local records
+   * already staged in the outbox are left on disk but are not uploaded.
+   */
+  async stopSharing(agent, args = '') {
+    const session = agent.session
+    const sessionId = String(session.id)
+    const binding = await this.bindingOf(session)
+    const connected = binding !== undefined &&
+      (binding.thread !== undefined || binding.joined === true || binding.autoUpload !== undefined)
+    if (!connected) return 'This session is not connected to Delta, so there is nothing to stop.'
+    const notes = []
+    if (binding.thread !== undefined && binding.joined !== true) {
+      // `thread unshare` keeps explicit invites and turns a shared thread private;
+      // a private thread has nothing to unshare.
+      if (binding.visibility !== 'private' && !/^private$/i.test(String(args ?? '').trim())) {
+        try {
+          const result = await this.processRun({ agent, session }, ['delta', '--json', 'thread', 'unshare', binding.thread], { timeoutMs: 30_000 })
+          if (result.exitCode !== 0) {
+            notes.push(`Delta could not make the thread private (${(result.stderr || result.stdout || 'unknown error').trim().slice(0, 300)}); the cloud copy may still be shared.`)
+          }
+        } catch (error) {
+          notes.push(`Delta could not make the thread private (${error instanceof Error ? error.message : String(error)}); the cloud copy may still be shared.`)
+        }
+      }
+    } else if (binding.joined === true) {
+      notes.push('This session joined someone else\'s thread; it was left untouched.')
+    }
+    // Cancel a share or join this session started, and stop the thread watch.
+    for (const pending of [requests.share, requests.join, requests.shareAfterTurn]) {
+      if (pending !== undefined && (pending.session === sessionId || pending.fresh === sessionId)) {
+        pending.cancelled = true
+        if (pending === requests.share) requests.share = undefined
+        if (pending === requests.shareAfterTurn) requests.shareAfterTurn = undefined
+        if (pending === requests.join) requests.join = undefined
+      }
+    }
+    try { await stopConversation() } catch {}
+    const runtime = stateFor(sessionId)
+    runtime.binding = undefined
+    runtime.reminder = undefined
+    runtime.currentTurnId = undefined
+    await this.store.delete(`session:${sessionId}`).catch(() => {})
+    await this.store.delete(`explicit:${sessionId}`).catch(() => {})
+    this.explicitSessions.set(sessionId, false)
+    this.hub.dispose(sessionId)
+    this.redrawFocused(sessionId)
+    const head = 'Stopped sharing and syncing this session. It stays quiet until you run /delta-share or /delta-join again.'
+    return notes.length ? `${head} ${notes.join(' ')}` : head
+  }
+
+  /**
    * Register one command Delta's menu asked for; the handler dispatches
    * `command.run`. A re-enabled plugin in the same process can find an earlier
    * instance's global registration of the same name (the Harness command
@@ -573,6 +627,14 @@ export class Bridge {
       const connectAction = ['delta-share', 'delta-join', 'delta-setup'].includes(spec.name) ||
         (spec.name === 'delta' && /^(share|join|setup)\b/.test(rawInput.trim()))
       if (connectAction) this.markExplicit(String(invocation.agent.session.id))
+      if (spec.name === 'delta-stop' || (spec.name === 'delta' && /^stop\b/i.test(rawInput.trim()))) {
+        const args = spec.name === 'delta' ? rawInput.trim().replace(/^stop/i, '').trim() : rawInput.trim()
+        try {
+          return { kind: 'success', text: await this.stopSharing(invocation.agent, args) }
+        } catch (error) {
+          return { kind: 'error', text: `Delta could not stop sharing this session: ${error instanceof Error ? error.message : String(error)}` }
+        }
+      }
       if (spec.name === 'delta-plugin-update' || (spec.name === 'delta' && /^plugin-update\b/.test(rawInput.trim()))) {
         const args = spec.name === 'delta' ? rawInput.trim().replace(/^plugin-update/, '').trim() : rawInput.trim()
         return { kind: 'success', text: await this.pluginUpdateResult(args) }
@@ -627,7 +689,14 @@ export class Bridge {
     if (existing !== undefined) return await existing
     const run = (async () => {
       const host = { command: { register: (spec) => this.commandRegister({ agent }, spec) } }
-      try { await registerCommands(host) } catch (error) {
+      try {
+        await registerCommands(host)
+        // Delta has no way to stop sharing a session; this port adds one.
+        await this.commandRegister({ agent }, {
+          name: 'delta-stop',
+          description: 'Delta: stop sharing this session and stop syncing it',
+        })
+      } catch (error) {
         this.logger.warn?.(`delta-dsh: could not register commands: ${error instanceof Error ? error.message : String(error)}`)
       }
     })()
