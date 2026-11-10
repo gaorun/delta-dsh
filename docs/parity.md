@@ -70,6 +70,7 @@
 
 ## 2. DSH 适配差异汇总
 
+0b. **band 文案本地化（DSH 特有的增量）**：band 的所有文案由 Delta hooks 以英文生成；client 按 Harness locale 翻译提示性内容（状态词、按钮、进度步骤、受众、更新行、host status 前缀），保留专有名词：Delta、DeltaDB、团队名、人名、URL、`/delta` 命令（`src/band-i18n.js`，build 时内联进 `lib/client.js`；测试 `test/band-i18n.test.mjs`）。`zh` 以外 locale 保持 Delta 原文。
 0. **按会话甄别（DSH 特有，上游没有）**：Claude 版一进程一会话，因此每个会话都有 band；DSH 一 Host 多会话，因此做了三层甄别：① **跟随视图**——Delta 一次只激活一个 Session，client 打开会话时 `POST /delta-dsh-api/focus`，Host 把 activation/watch/录制移到该 Session（`src/bridge.js` 的 `focus`/`focusBand`、`src/http.js` /focus、`src/client.js` 挂载时上报），其他已打开会话只有 `/delta` 命令菜单、无 band、不录制；② **只服务用户可见的 root 会话**（排除 Team teammate 与 subagent child，`src/visibility.js`，`src/index.js` 各监听器同样跳过）；③ **Delta 有内容可说才显示 band**（thread/join/上传中/操作进行中/watch 失败/仓库已有 `.delta/settings.json`），未 setup 的仓库保持安静。测试见 `test/visibility.test.mjs`。
 
 1. **协议身份保留 claude-code**：`--source claude-code`、producer `Claude Code`、`DELTA_CLI_INTEGRATION=claude_code` 均未改（`vendor/delta/cli/delta-cli.ts:35`、`thread-commands.ts:414`），否则 Delta 契约/遥测拒收；代价是线程里不显示 DeepSeek Harness。
@@ -88,7 +89,7 @@
 ## 3. 验证状态
 
 ### 已实测（本机，2026-11-10）
-- 单元/集成测试：`node --test test/*.test.mjs` → **35 passed / 0 failed / 0 skipped**（engine 9、rows 6、surfaces 6、process 4、process-cli 2、visibility 5、smoke 2、integration 1）。integration 用真实 git checkout；process-cli 用真实 `delta` CLI。
+- 单元/集成测试：`node --test test/*.test.mjs` → **44 passed / 0 failed / 0 skipped**（engine 9、rows 6、surfaces 6、process 4、process-cli 2、visibility 5、band-i18n 9、smoke 2、integration 1）。integration 用真实 git checkout；process-cli 用真实 `delta` CLI。
 - 安装：`plugin_manager install_bundle` → `application: applied`，`~/.dsh/profiles/desktop/node_modules/delta-dsh` 指向本仓库；禁用/启用可反复加载（路由与命令在进程内不冲突）。
 - band 数据链路：`GET /delta-dsh-api/status?session=<live>` → 200，真实返回 Delta 的绘制树：先是 “○ Delta · Not set up /delta-setup”，setup 完成后同一会话返回 “● Delta · Syncing”、真实 `https://delta.dev/join/thread_…` 链接、`Synced with Zed VIP`，以及 copy link / Share 按钮（按钮闭包含 generation/actionId）。
 - 真实 Delta 账号：插件在本机 desktop profile 运行、`/delta-setup` 向导经 DSH 提问完成并把 `{"threads":{"mode":"private","organization":"…"}}` 写入仓库 `.delta/settings.json`；Delta CLI 自动创建 thread 并在 `$DSH_HOME/delta-dsh/claude/delta-plugin/outbox/<session>` 持续暂存记录（实测 869 个记录文件）；`delta --json thread show <thread>` 能读到本会话 prompt 原文。即：自动同步、录制、CLI 集成、setup 向导在本机真实链路跑通。

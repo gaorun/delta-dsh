@@ -11,6 +11,7 @@
 window.__ModuleLoader__.load({
   id: 'delta-dsh',
   factory: (require) => {
+    /*__BAND_I18N__*/
     const module = { exports: {} }
     const exports = module.exports
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
@@ -111,11 +112,11 @@ window.__ModuleLoader__.load({
     }
 
     /** One serialized node (Box/Text/Button/Link, or plain text). */
-    function Node({ node, pending, onPress }) {
-      if (typeof node === 'string') return node
+    function Node({ node, pending, onPress, tr }) {
+      if (typeof node === 'string') return tr(node)
       if (node === null || typeof node !== 'object') return null
       const children = (node.children ?? []).map((child, index) =>
-        h(Node, { key: String(index), node: child, pending, onPress }))
+        h(Node, { key: String(index), node: child, pending, onPress, tr }))
       if (node.type === 'Text') {
         return h('span', { className: 'dsd-text', ...textAttributes(node.props ?? {}) }, ...children)
       }
@@ -126,10 +127,10 @@ window.__ModuleLoader__.load({
           href,
           target: '_blank',
           rel: 'noreferrer noopener',
-        }, ...(children.length ? children : [String(node.props?.label ?? href ?? '')]))
+        }, ...(children.length ? children : [tr(String(node.props?.label ?? href ?? ''))]))
       }
       if (node.type === 'Button') {
-        const label = String(node.props?.label ?? '')
+        const label = tr(String(node.props?.label ?? ''))
         const actionId = typeof node.actionId === 'string' ? node.actionId : ''
         const disabled = node.props?.disabled === true || actionId === '' || pending !== undefined
         return h('button', {
@@ -145,8 +146,10 @@ window.__ModuleLoader__.load({
     }
 
     /** The band above the prompt: the Host's current drawing and its buttons. */
-    function Band({ useBand, press, t }) {
+    function Band({ useBand, press, t, language }) {
       const snapshot = useBand((value) => value)
+      const currentLanguage = typeof language === 'function' ? language() : language
+      const tr = (text) => translateBandText(text, currentLanguage)
       const [pending, setPending] = React.useState(undefined)
       const [notice, setNotice] = React.useState(undefined)
       const onPress = React.useCallback((actionId) => {
@@ -164,8 +167,8 @@ window.__ModuleLoader__.load({
       if (snapshot === undefined || snapshot.tree === null) return null
       return h('div', { className: 'dsd-dock' },
         h('div', { className: 'dsd-band', role: 'group', 'aria-label': t('band'), 'data-generation': snapshot.generation },
-          ...snapshot.tree.map((node, index) => h(Node, { key: `${snapshot.generation}.${index}`, node, pending, onPress })),
-          snapshot.status ? h('div', { className: 'dsd-status' }, snapshot.status) : null,
+          ...snapshot.tree.map((node, index) => h(Node, { key: `${snapshot.generation}.${index}`, node, pending, onPress, tr })),
+          snapshot.status ? h('div', { className: 'dsd-status' }, tr(snapshot.status)) : null,
           notice ? h('div', { className: 'dsd-notice', role: 'status' }, notice) : null,
         ),
       )
@@ -270,6 +273,9 @@ window.__ModuleLoader__.load({
         inject: (sessionId) => ({
           hooks: { band: watchOf(sessionId).store },
           press: (generation, actionId) => watchOf(sessionId).press(generation, actionId),
+          language: () => {
+            try { return locale.getLocale().active } catch { return 'en' }
+          },
         }),
       }, Band))
     }

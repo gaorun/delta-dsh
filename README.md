@@ -65,6 +65,14 @@ so the port discriminates on three levels:
 
 ## The band
 
+Band copy follows the Harness language. With a Chinese UI the hint text is
+translated — status labels, buttons, progress steps, audience, update rows — while
+proper nouns stay as written: Delta, DeltaDB, team names, people's names, links,
+and `/delta` commands. Every other locale shows Delta's original English. The
+translation lives in `src/band-i18n.js` and is inlined into the browser bundle by
+the build.
+
+
 Delta draws a status band above the composer: the thread link and audience,
 sync progress and failures, plugin-release notices, and its buttons. The Host
 half draws the band with Delta's own hooks; the browser half renders the

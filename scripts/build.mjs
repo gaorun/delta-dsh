@@ -10,7 +10,7 @@
  * Run with: node scripts/build.mjs
  */
 import { build } from 'esbuild'
-import { copyFile, mkdir } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -40,5 +40,17 @@ await build({
   logLevel: 'info',
 })
 
-await copyFile(join(plugin, 'src', 'client.js'), join(lib, 'client.js'))
-console.log('lib/client.js copied from src/client.js')
+/**
+ * Inline the Chinese band copy into the browser wrapper: the Client module
+ * system loads one self-contained file, so it cannot import a sibling module.
+ * `src/band-i18n.js` stays an ordinary ESM module for its unit test; the build
+ * strips its exports and substitutes it at the wrapper's placeholder.
+ */
+const bandI18n = (await readFile(join(plugin, 'src', 'band-i18n.js'), 'utf8'))
+  .replace(/^export /gm, '')
+  .trim()
+const client = await readFile(join(plugin, 'src', 'client.js'), 'utf8')
+const placeholder = '    /*__BAND_I18N__*/'
+if (!client.includes(placeholder)) throw new Error('src/client.js is missing the band-i18n placeholder')
+await writeFile(join(lib, 'client.js'), client.replace(placeholder, bandI18n.split('\n').map((line) => `    ${line}`).join('\n')), 'utf8')
+console.log('lib/client.js built from src/client.js + src/band-i18n.js')
