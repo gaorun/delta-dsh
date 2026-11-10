@@ -542,7 +542,8 @@ export async function offerOnboarding(
   env: SetupEnv, interaction: Interaction, store: OnboardingStore, flags: OnboardingFlags,
   claimed: (key: string) => void = () => {},
 ): Promise<OnboardingOutcome> {
-  if (flags.configured || flags.joined || flags.joining || !flags.newToPlugin) return 'skipped'
+  // The port never offers setup by itself; /delta-setup is the only way in.
+  return 'skipped'
   const key = `setup-offered:${await env.gitCommonDir() ?? flags.root}`
   if (await store.get(key)) return 'skipped'
   await store.set(key, true)

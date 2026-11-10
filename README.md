@@ -41,6 +41,20 @@ setup offers to install it, as the Claude Code plugin does.
 Each command also works as `/delta <command>`, such as `/delta share`. Setup
 writes `.delta/settings.json` and keeps that file out of Git.
 
+## When Delta connects
+
+Opening a Session never connects to Delta on its own. A checkout Delta was
+deliberately set up in (`.delta/settings.json`) follows that setting, including
+automatic sync; a checkout that was never set up stays completely offline — no
+setup offer, no sign-in dialog, no Delta CLI call — until you run `/delta-setup`,
+`/delta-share` or `/delta-join`. The port also never offers setup on its own:
+`/delta-setup` is the only way into the wizard.
+
+Dialog copy follows the Harness language too: the setup wizard, share audience
+and sign-in questions are translated (Chinese when the UI is Chinese) and the
+answers are mapped back to Delta's own labels, so proper nouns, team names and
+commands stay intact.
+
 ## Which Sessions are Delta Sessions
 
 The Claude Code plugin runs one process per Session, so every Session it sees

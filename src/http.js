@@ -6,7 +6,7 @@
  * band therefore speaks plain HTTP on the app's own origin:
  *
  * - `GET  /delta-dsh-api/status?session=<id>`  the current snapshot
- * - `POST /delta-dsh-api/focus`                `{session}`: the person opened this Session
+ * - `POST /delta-dsh-api/focus`                `{session, language?}`: the person opened this Session
  * - `POST /delta-dsh-api/band/press`           `{session, generation, actionId}`
  *
  * The browser polls `status` while its band is mounted and redraws on a changed
@@ -64,7 +64,7 @@ export function registerBandRoutes(ctx, { hub, draw, focus, base = '/delta-dsh-a
         if (rest === '/focus' && req.method === 'POST') {
           const body = JSON.parse(await readBody(req, 4 * 1024))
           if (typeof body.session !== 'string') return sendJson(res, 400, { error: 'invalid focus' })
-          await focus?.(body.session)
+          await focus?.(body.session, typeof body.language === 'string' ? body.language : undefined)
           return sendJson(res, 200, { ok: true })
         }
         if (rest === '/band/press' && req.method === 'POST') {

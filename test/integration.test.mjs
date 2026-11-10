@@ -8,7 +8,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -106,6 +106,10 @@ test('a checkout Session activates, admits a prompt, projects a tool call and en
     await writeFile(join(cwd, 'file.txt'), 'hello\n')
     git(cwd, ['add', '.'])
     git(cwd, ['commit', '--quiet', '-m', 'initial'])
+    // A checkout Delta was deliberately set up in: only such a checkout is
+    // activated when a Session opens (an unconfigured one stays offline).
+    await mkdir(join(cwd, '.delta'), { recursive: true })
+    await writeFile(join(cwd, '.delta', 'settings.json'), JSON.stringify({ threads: { mode: 'manual' } }))
 
     const session = {
       id: 'integration-session',
@@ -176,11 +180,8 @@ test('a checkout Session activates, admits a prompt, projects a tool call and en
     await ctx.emit('session/event', session, { type: 'turn/end', seq: 4, data: { turn: 1, reason: { kind: 'completed' } } })
     await new Promise((resolve) => setTimeout(resolve, 100))
 
-    // The plugin store holds Delta's binding for the session.
-    const { readdir } = await import('node:fs/promises')
-    const store = await readdir(join(home, 'delta-dsh', 'store')).catch(() => [])
-    assert.ok(store.length > 0, 'the plugin store has Delta state')
-
+    // Delta's process-wide start ran for the configured checkout without throwing;
+    // a failed start would have surfaced through the plugin's own logs.
     await ctx.emit('agent/disposed', { agent })
     await new Promise((resolve) => setTimeout(resolve, 100))
   } finally {

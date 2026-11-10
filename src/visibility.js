@@ -59,6 +59,18 @@ export function repoPolicyConfigured(cwd) {
   return configured
 }
 
+/**
+ * Whether opening a Session may connect to Delta on its own.
+ *
+ * Only a checkout the person deliberately set up (`.delta/settings.json`) is
+ * served at session start: that file is how automatic sync was opted into. A
+ * fresh project gets no setup offer, no sign-in dialog and no Delta connection
+ * until the person runs `/delta-setup`, `/delta-share` or `/delta-join`.
+ */
+export function shouldAutoActivate(configured) {
+  return configured === true
+}
+
 /** A user-facing root Session: not a subagent child, not a Team teammate. */
 export function isUserFacingSession(agent, membership) {
   if (agent === undefined || agent === null || agent.session === undefined) return false

@@ -10,6 +10,17 @@
  */
 export const patches = [
   {
+    file: 'setup/setup.ts',
+    why: 'The Harness port never offers setup on its own: opening a Session, or an explicit /delta-share in an unconfigured checkout, must not pop a Delta dialog or start a connection. /delta-setup is the only way in, so the onboarding offer is skipped.',
+    find: `): Promise<OnboardingOutcome> {
+  if (flags.configured || flags.joined || flags.joining || !flags.newToPlugin) return 'skipped'
+`,
+    replace: `): Promise<OnboardingOutcome> {
+  // The port never offers setup by itself; /delta-setup is the only way in.
+  return 'skipped'
+`,
+  },
+  {
     file: 'sharing/join.ts',
     why: 'Claude Code joins by starting a fresh Session after /clear and moving it with /cd. The Harness keeps one Session per tab: the current Session joins in place, its working directory moves through the adapter\'s cd, and there is no plugin-callable /clear. This patch replaces only the session transition; mounting, verification, activation and every failure path stay Delta\'s.',
     find: `    const handsOff = (await host.session.surfaces()).includes('desktop')

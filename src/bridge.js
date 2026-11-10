@@ -20,7 +20,8 @@ import { reportedProgress } from '../vendor/delta/band/band.tsx'
 import { watchStatus, watchedSession } from '../vendor/delta/watch/watch.ts'
 import { activation, sessions as deltaSessions } from '../vendor/delta/core/session-state.ts'
 import { apiBlocks } from './rows.js'
-import { bandShouldShow, isUserFacingSession, repoPolicyConfigured } from './visibility.js'
+import { bandShouldShow, isUserFacingSession, repoPolicyConfigured, shouldAutoActivate } from './visibility.js'
+import { translateDialog, translateQuestion } from './dialog-i18n.js'
 
 /** CLI names for Harness tool names, so Delta's tool-call rows keep their Claude titles. */
 const TOOL_NAMES = {
@@ -116,6 +117,8 @@ export class Bridge {
     this.questionSequence = 0
     this.userFacing = new WeakMap()
     this.focusedSession = undefined
+    /** The browser's active locale, for Delta's own question dialogs. */
+    this.language = 'en'
     /** Sessions whose Delta start has completed in this process. */
     this.activated = new Set()
     /** Focus attempts per Session, for retrying a start Delta did not take. */
@@ -292,7 +295,8 @@ export class Bridge {
    * hooks keep one active Session per process, so switching the focused Session
    * switches Delta's activation with it.
    */
-  async focus(sessionId) {
+  async focus(sessionId, language) {
+    if (typeof language === 'string' && /^[a-z]{2}/i.test(language)) this.language = language
     if (this.focusedSession !== sessionId) {
       const previous = this.focusedSession
       this.focusedSession = sessionId
@@ -314,6 +318,13 @@ export class Bridge {
     const session = agent.session
     await this.ensureCommands(agent)
     const cwd = this.cwdOf(session)
+    // A checkout nobody set up stays offline: no setup offer, no sign-in dialog,
+    // no Delta connection. `/delta-setup`, `/delta-share` and `/delta-join` connect
+    // when the person asks.
+    if (!shouldAutoActivate(repoPolicyConfigured(cwd))) {
+      this.redrawFocused(sessionId)
+      return
+    }
     await this.engine.dispatch('session.start', Object.freeze({ cwd, surface: 'terminal', isInteractive: true }),
       async () => ({ cwd }), { agent, session, signal: new AbortController().signal })
     // Delta's session.start catches its own activation failures, so mark the start
@@ -354,8 +365,9 @@ export class Bridge {
   }
 
   /** Announce one Session's band to an open browser (the Client calls this when its dock mounts). */
-  async focusBand(sessionId) {
-    if (!this.isFocused(sessionId)) await this.focus(sessionId)
+  async focusBand(sessionId, language) {
+    if (!this.isFocused(sessionId)) await this.focus(sessionId, language)
+    else if (typeof language === 'string' && /^[a-z]{2}/i.test(language)) this.language = language
     await this.drawBand(sessionId)
   }
 
@@ -839,15 +851,24 @@ export class Bridge {
     const agent = this.agentOf(context)
     const request = normalizeAsk(question, options)
     request.id = `delta-${++this.questionSequence}`
+    // Delta matches answers against its original English labels, so the person sees
+    // translated copy and the answer is mapped back before Delta reads it.
+    const shown = translateQuestion(request.question, request.options, this.language)
+    const asked = {
+      ...request,
+      question: shown.question,
+      ...(request.header === undefined ? {} : { header: translateDialog(request.header, this.language) }),
+      ...(shown.options === undefined ? {} : { options: shown.options }),
+    }
     const answer = await this.ctx.userQuestions.ask({
-      questions: [request],
+      questions: [asked],
       ...(agent === undefined ? {} : { agent }),
       ...(context?.signal === undefined ? {} : { signal: context.signal }),
     })
     const first = answer?.answers?.[0]
     if (first === undefined) return ''
     if (first.custom !== undefined && first.custom.length) return first.custom
-    return (first.selected ?? []).join(', ')
+    return (first.selected ?? []).map((label) => shown.originalOf.get(label) ?? label).join(', ')
   }
 
   /** Write text to the host clipboard for the surface a copy control came from. */

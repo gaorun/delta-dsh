@@ -187,11 +187,11 @@ export function apply(ctx) {
   try { owner.dispose?.() } catch {}
   owner.hub = hub
   owner.draw = (sessionId) => bridge.drawBand(sessionId)
-  owner.focus = (sessionId) => bridge.focusBand(sessionId)
+  owner.focus = (sessionId, language) => bridge.focusBand(sessionId, language)
   owner.dispose = ctx.effect(() => registerBandRoutes(ctx, {
     hub: () => owner.hub,
     draw: (sessionId) => owner.draw(sessionId),
-    focus: (sessionId) => owner.focus(sessionId),
+    focus: (sessionId, language) => owner.focus(sessionId, language),
     base: '/delta-dsh-api',
   }))
 
