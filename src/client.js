@@ -205,6 +205,14 @@ window.__ModuleLoader__.load({
           store.set(snapshot)
         }
       }
+      // Tell the Host this is the Session the person is looking at: Delta follows
+      // one Session at a time, so opening a conversation moves the band (and the
+      // thread watch) to it.
+      fetch(`${BASE}/focus`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ session: sessionId }),
+      }).catch(() => {})
       const poll = async () => {
         if (closed) return
         try {

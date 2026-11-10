@@ -68,6 +68,9 @@ export function apply(ctx) {
   // Delta's own hooks module registers its `on(...)` handlers here, once.
   register((event, matcherOrHandler, maybeHandler) => engine.on(event, matcherOrHandler, maybeHandler))
 
+  /** Every live root Session a person opened (Team teammates and child agents excluded). */
+  const userFacingRoots = () => ctx.agents.roots().filter((agent) => agent?.session !== undefined && isRootSession(agent.session) && bridge.isUserFacing(agent))
+
   /** Dispatch one Harness lifecycle event into Delta's hooks. */
   const dispatch = (agent, session, event, input, bottom) =>
     engine.dispatch(event, Object.freeze(input), bottom, {
@@ -76,31 +79,28 @@ export function apply(ctx) {
       signal: new AbortController().signal,
     })
 
-  /** Start Delta's view of one root Session: its command menu, then its own start hook. */
-  const startRootSession = async (agent) => {
-    const session = agent.session
-    const cwd = bridge.cwdOf(session)
-    rows.state(String(session.id))
-    await bridge.ensureCommands(agent)
-    await dispatch(agent, session, 'session.start',
-      { cwd, surface: 'terminal', isInteractive: true },
-      async () => ({ cwd }))
-  }
 
-  // A root session starting: Delta activates recording, registers commands and
-  // decides whether this checkout syncs.
+  // A root session starting: every user-facing Session gets Delta's command
+  // menu, but Delta activates (and draws a band) only for the Session the person
+  // is looking at. With one open Session that is this one; with several, the
+  // browser's dock asks to focus the one it shows.
   ctx.on('agent/created', async (payload) => {
     const { agent } = payload
-    if (agent?.session === undefined || !isRootSession(agent.session)) return
-    await startRootSession(agent)
+    if (agent?.session === undefined || !isRootSession(agent.session) || !bridge.isUserFacing(agent)) return
+    await bridge.ensureCommands(agent)
+    if (userFacingRoots().length === 1) await bridge.focus(String(agent.session.id))
   })
 
   // A root session ending: Delta finishes its turn bookkeeping and cleans up.
   ctx.on('agent/disposed', (payload) => {
     const agent = payload?.agent
     const session = agent?.session
-    if (session === undefined || !isRootSession(session)) return
+    if (session === undefined || !isRootSession(session) || !bridge.isUserFacing(agent)) return
     const sessionId = String(session.id)
+    if (!bridge.isFocused(sessionId)) {
+      hub.dispose(sessionId)
+      return
+    }
     void dispatch(agent, session, 'session.end', { sessionId, reason: 'other' }, async () => ({ sessionId }))
       .catch((error) => logger.warn(`delta-dsh: session end failed: ${error instanceof Error ? error.message : String(error)}`))
       .finally(() => {
@@ -113,7 +113,7 @@ export function apply(ctx) {
   ctx.on('session/event', (session, event) => {
     if (session === undefined || !isRootSession(session)) return
     const agent = ctx.agents.get(session.id)
-    if (agent === undefined) return
+    if (agent === undefined || !bridge.isUserFacing(agent) || !bridge.isFocused(String(session.id))) return
     void rows.handle(agent, session, event)
   })
 
@@ -121,7 +121,7 @@ export function apply(ctx) {
   // `tool.call`; Delta's handler calls `next` and keeps the structured result.
   ctx.on('tools/execute', async (exec, next) => {
     const agent = exec.agent ?? ctx.agents.currentInitiator()
-    if (agent?.session === undefined || !isRootSession(agent.session)) return await next()
+    if (agent?.session === undefined || !isRootSession(agent.session) || !bridge.isUserFacing(agent) || !bridge.isFocused(String(agent.session.id))) return await next()
     const session = agent.session
     let outcome
     const input = {
@@ -148,7 +148,7 @@ export function apply(ctx) {
   ctx.on('agent/pre-step', async (payload, next) => {
     const agent = payload?.agent
     const session = agent?.session
-    if (session === undefined || !isRootSession(session)) return await next()
+    if (session === undefined || !isRootSession(session) || !bridge.isUserFacing(agent) || !bridge.isFocused(String(session.id))) return await next()
     const messages = Array.isArray(payload.messages) ? payload.messages : []
     const human = messages.filter((message) => message.role === 'user' && message.source?.kind === 'user')
     if (!human.length) return await next()
@@ -184,9 +184,11 @@ export function apply(ctx) {
   try { owner.dispose?.() } catch {}
   owner.hub = hub
   owner.draw = (sessionId) => bridge.drawBand(sessionId)
+  owner.focus = (sessionId) => bridge.focusBand(sessionId)
   owner.dispose = ctx.effect(() => registerBandRoutes(ctx, {
     hub: () => owner.hub,
     draw: (sessionId) => owner.draw(sessionId),
+    focus: (sessionId) => owner.focus(sessionId),
     base: '/delta-dsh-api',
   }))
 
@@ -194,11 +196,15 @@ export function apply(ctx) {
     void bridge.dispose()
   })
 
-  // A plugin enabled into a running Host also serves the Sessions already open.
-  for (const agent of ctx.agents.roots()) {
-    if (!isRootSession(agent.session)) continue
-    void startRootSession(agent).catch((error) => {
-      logger.warn(`delta-dsh: could not start the open Session: ${error instanceof Error ? error.message : String(error)}`)
+  // A plugin enabled into a running Host gives every open Session its command
+  // menu, then focuses the only one if there is just one; with several, the
+  // browser asks for the Session it shows.
+  const open = userFacingRoots()
+  for (const agent of open) {
+    void bridge.ensureCommands(agent).catch((error) => {
+      logger.warn(`delta-dsh: could not register commands: ${error instanceof Error ? error.message : String(error)}`)
     })
   }
+  if (open.length === 1) void bridge.focus(String(open[0].session.id)).catch(() => {})
+
 }

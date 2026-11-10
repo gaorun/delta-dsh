@@ -6,6 +6,7 @@
  * band therefore speaks plain HTTP on the app's own origin:
  *
  * - `GET  /delta-dsh-api/status?session=<id>`  the current snapshot
+ * - `POST /delta-dsh-api/focus`                `{session}`: the person opened this Session
  * - `POST /delta-dsh-api/band/press`           `{session, generation, actionId}`
  *
  * The browser polls `status` while its band is mounted and redraws on a changed
@@ -34,10 +35,11 @@ function isLocalPage(ctx, req) {
  * @param ctx Harness plugin context (`webServer` injected).
  * @param options.hub a `SurfaceHub`, or a function returning the current one.
  * @param options.draw `(sessionId) => Promise<void>` redraws one session's band.
+ * @param options.focus `(sessionId) => Promise<void>` makes a Session the Delta one.
  * @param options.base route prefix.
  * @returns the web server disposer.
  */
-export function registerBandRoutes(ctx, { hub, draw, base = '/delta-dsh-api' }) {
+export function registerBandRoutes(ctx, { hub, draw, focus, base = '/delta-dsh-api' }) {
   const hubOf = typeof hub === 'function' ? hub : () => hub
   return ctx.webServer.register({
     kind: 'prefix',
@@ -56,6 +58,12 @@ export function registerBandRoutes(ctx, { hub, draw, base = '/delta-dsh-api' }) 
           const snapshot = hubOf().current(session)
           const error = hubOf().lastDrawError
           return sendJson(res, 200, error === undefined ? snapshot : { ...snapshot, error })
+        }
+        if (rest === '/focus' && req.method === 'POST') {
+          const body = JSON.parse(await readBody(req, 4 * 1024))
+          if (typeof body.session !== 'string') return sendJson(res, 400, { error: 'invalid focus' })
+          await focus?.(body.session)
+          return sendJson(res, 200, { ok: true })
         }
         if (rest === '/band/press' && req.method === 'POST') {
           const body = JSON.parse(await readBody(req, 64 * 1024))

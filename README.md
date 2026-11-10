@@ -41,6 +41,28 @@ setup offers to install it, as the Claude Code plugin does.
 Each command also works as `/delta <command>`, such as `/delta share`. Setup
 writes `.delta/settings.json` and keeps that file out of Git.
 
+## Which Sessions are Delta Sessions
+
+The Claude Code plugin runs one process per Session, so every Session it sees
+gets a Delta status bar. A Harness Host runs every root Session in one process,
+so the port discriminates on three levels:
+
+1. **Which Sessions Delta follows.** Delta's hooks keep one active Session per
+   process, so the port follows the Session you are viewing: opening a
+   conversation moves Delta's activation, recording and thread watch to it, and
+   leaves the previously viewed Session without a band. Every user-facing
+   Session still gets the `/delta` command menu, so `/delta-share` works from
+   any conversation. Agent-internal Sessions are never served: Team teammates
+   and subagent children get no Delta start, no questions, and no status bar.
+2. **When the band shows at all.** Only when Delta has something to say about
+   the viewed Session: it has a thread (shared, synced, or joined), a join or
+   upload in flight, a running Delta operation or watch failure, or its checkout
+   has a deliberate `.delta/settings.json` policy (the "manual" reminder). A
+   checkout Delta was never set up in stays quiet; `/delta-setup` and
+   `/delta-share` remain one command away.
+3. **When it shows a reminder.** A Session in a configured checkout with no
+   thread shows Delta's own nudge toward `/delta-share` in manual mode.
+
 ## The band
 
 Delta draws a status band above the composer: the thread link and audience,
@@ -100,11 +122,10 @@ the network. The smoke test loads `lib/index.js`, so run `build` first.
   staged for a thread this Session owned locally are left behind, not carried
   into the joined thread.
 - Delta's hooks were written for one Session per process. The Harness keeps
-  every open Session in one Host process, so the port runs recording per
-  Session (bindings, outbox, rows) but Delta's process-wide bookkeeping — the
-  active activation, the band's watched thread, pending share/join requests —
-  still points at the Session that started last. One Session at a time is the
-  supported shape in v1.
+  every open Session in one Host process, so the port follows the Session you
+  view: switching conversations moves Delta's activation and thread watch, and
+  a Session that is not on screen is not recorded (its staged records stay
+  local). Share/join operations run in the Session that started them.
 - Delta's plugin self-update path is adapted to the Harness Plugin Manager.
   `/delta-update` still updates the Delta app and CLI through Delta's own code.
 - Windows-specific install and update orchestration keeps Delta's code but is

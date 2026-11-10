@@ -16,7 +16,11 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { runProcess, spawnProcess } from './process.js'
 import { configDir, dataDir } from './paths.js'
 import { registerCommands } from '../vendor/delta/setup/commands.ts'
+import { reportedProgress } from '../vendor/delta/band/band.tsx'
+import { watchStatus, watchedSession } from '../vendor/delta/watch/watch.ts'
+import { activation, sessions as deltaSessions } from '../vendor/delta/core/session-state.ts'
 import { apiBlocks } from './rows.js'
+import { bandShouldShow, isUserFacingSession, repoPolicyConfigured } from './visibility.js'
 
 /** CLI names for Harness tool names, so Delta's tool-call rows keep their Claude titles. */
 const TOOL_NAMES = {
@@ -108,7 +112,10 @@ export class Bridge {
     this.state = new Map()
     this.redrawTimers = new Map()
     this.commandNames = new Set()
+    this.menuPromises = new Map()
     this.questionSequence = 0
+    this.userFacing = new WeakMap()
+    this.focusedSession = undefined
     try {
       this.packageVersionValue = JSON.parse(readFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version
     } catch {
@@ -270,6 +277,78 @@ export class Bridge {
 
   // ── the band surface ─────────────────────────────────────────────────────
 
+  /** The Session the person is looking at; Delta follows one Session at a time. */
+  isFocused(sessionId) {
+    return this.focusedSession === sessionId
+  }
+
+  /**
+   * Make one Session the Delta Session: its command menu, then its own
+   * session.start (which activates recording and the thread watch). Delta's
+   * hooks keep one active Session per process, so switching the focused Session
+   * switches Delta's activation with it.
+   */
+  async focus(sessionId) {
+    if (this.focusedSession === sessionId) return
+    const previous = this.focusedSession
+    this.focusedSession = sessionId
+    // Hide the previous session's band immediately; its watch stops when the new
+    // activation runs (Delta stops the conversation it was watching).
+    if (previous !== undefined) this.hub.publish(previous, null)
+    let agent
+    try { agent = this.ctx.agents?.get?.(sessionId) } catch {}
+    if (agent === undefined || !this.isUserFacing(agent)) return
+    const session = agent.session
+    await this.ensureCommands(agent)
+    const cwd = this.cwdOf(session)
+    await this.engine.dispatch('session.start', Object.freeze({ cwd, surface: 'terminal', isInteractive: true }),
+      async () => ({ cwd }), { agent, session, signal: new AbortController().signal })
+    this.invalidateBand({ agent, session })
+  }
+
+  /** Announce one Session's band to an open browser (the Client calls this when its dock mounts). */
+  async focusBand(sessionId) {
+    if (!this.isFocused(sessionId)) await this.focus(sessionId)
+    await this.drawBand(sessionId)
+  }
+
+  /** The Team role of one agent, when it belongs to a Team. */
+  teamMembership(agent) {
+    try { return this.ctx.get?.('agentTeams')?.tryMembership?.(agent) } catch { return undefined }
+  }
+
+  /** Whether this Session is one a person opened: a root Session, not a Team teammate. */
+  isUserFacing(agent) {
+    if (agent === undefined || agent === null) return false
+    const cached = this.userFacing.get(agent)
+    if (cached !== undefined) return cached
+    const facing = isUserFacingSession(agent, this.teamMembership(agent))
+    this.userFacing.set(agent, facing)
+    return facing
+  }
+
+  /** A Session's Delta binding, if it has one. */
+  async bindingOf(session) {
+    try { return await this.store.get(`session:${String(session.id)}`) } catch { return undefined }
+  }
+
+  /** Whether Delta has something worth showing for this Session (see `visibility.js`). */
+  async bandShouldShow(agent, session) {
+    const userFacing = this.isUserFacing(agent)
+    if (!userFacing) return false
+    let progress = false
+    let watchError = false
+    try { progress = reportedProgress() !== undefined } catch {}
+    try { watchError = watchStatus()?.error !== undefined } catch {}
+    return bandShouldShow({
+      userFacing,
+      binding: await this.bindingOf(session),
+      configured: repoPolicyConfigured(this.cwdOf(session)),
+      progress,
+      watchError,
+    })
+  }
+
   /** Redraw one session's band from Delta's own hooks and publish it to the Client. */
   async drawBand(sessionId) {
     let agent
@@ -280,6 +359,14 @@ export class Bridge {
     }
     if (session === undefined) {
       this.hub.dispose(sessionId)
+      return
+    }
+    if (!this.isFocused(sessionId)) {
+      this.hub.publish(sessionId, null)
+      return
+    }
+    if (!(await this.bandShouldShow(agent, session))) {
+      this.hub.publish(sessionId, null)
       return
     }
     let result
@@ -459,15 +546,23 @@ export class Bridge {
     return { command: spec.name }
   }
 
-  /** Install Delta's command menu for one agent, once per agent. */
+  /**
+   * Install Delta's command menu for one agent, once per agent. Concurrent
+   * callers (the plugin's startup pass and a new agent) share the same run, so a
+   * caller that awaits this sees the complete menu.
+   */
   async ensureCommands(agent) {
     const key = `menu:${String(agent.session.id)}`
-    if (this.commandNames.has(key)) return
-    this.commandNames.add(key)
-    const host = { command: { register: (spec) => this.commandRegister({ agent }, spec) } }
-    try { await registerCommands(host) } catch (error) {
-      this.logger.warn?.(`delta-dsh: could not register commands: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    const existing = this.menuPromises.get(key)
+    if (existing !== undefined) return await existing
+    const run = (async () => {
+      const host = { command: { register: (spec) => this.commandRegister({ agent }, spec) } }
+      try { await registerCommands(host) } catch (error) {
+        this.logger.warn?.(`delta-dsh: could not register commands: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })()
+    this.menuPromises.set(key, run)
+    await run
   }
 
   async commandRun(context, input) {

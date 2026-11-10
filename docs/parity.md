@@ -70,6 +70,8 @@
 
 ## 2. DSH 适配差异汇总
 
+0. **按会话甄别（DSH 特有，上游没有）**：Claude 版一进程一会话，因此每个会话都有 band；DSH 一 Host 多会话，因此做了三层甄别：① **跟随视图**——Delta 一次只激活一个 Session，client 打开会话时 `POST /delta-dsh-api/focus`，Host 把 activation/watch/录制移到该 Session（`src/bridge.js` 的 `focus`/`focusBand`、`src/http.js` /focus、`src/client.js` 挂载时上报），其他已打开会话只有 `/delta` 命令菜单、无 band、不录制；② **只服务用户可见的 root 会话**（排除 Team teammate 与 subagent child，`src/visibility.js`，`src/index.js` 各监听器同样跳过）；③ **Delta 有内容可说才显示 band**（thread/join/上传中/操作进行中/watch 失败/仓库已有 `.delta/settings.json`），未 setup 的仓库保持安静。测试见 `test/visibility.test.mjs`。
+
 1. **协议身份保留 claude-code**：`--source claude-code`、producer `Claude Code`、`DELTA_CLI_INTEGRATION=claude_code` 均未改（`vendor/delta/cli/delta-cli.ts:35`、`thread-commands.ts:414`），否则 Delta 契约/遥测拒收；代价是线程里不显示 DeepSeek Harness。
 2. **没有 `session.append` 的可改写入入口**：`session/event` 是 post-commit、不可改写、不能新增事件类型；行来自 `src/rows.js` 的投影，因此 `/delta show` 自绘行、给模型的远程行注入都不可能，v1 去掉。
 3. **没有 `ui.status` / transcript 行**：`ui.status`/`ui.log(to:'transcript')` 落到 band 的单行 status（`bridge.js:699-714`、`client.js:161`），覆盖式、不持久、不写入会话记录。
@@ -86,15 +88,16 @@
 ## 3. 验证状态
 
 ### 已实测（本机，2026-11-10）
-- 单元/集成测试：`node --test test/*.test.mjs` → **30 passed / 0 failed / 0 skipped**（engine 9、rows 6、surfaces 6、process 4、process-cli 2、smoke 2、integration 1）。integration 用真实 git checkout；process-cli 用真实 `delta` CLI。
+- 单元/集成测试：`node --test test/*.test.mjs` → **35 passed / 0 failed / 0 skipped**（engine 9、rows 6、surfaces 6、process 4、process-cli 2、visibility 5、smoke 2、integration 1）。integration 用真实 git checkout；process-cli 用真实 `delta` CLI。
 - 安装：`plugin_manager install_bundle` → `application: applied`，`~/.dsh/profiles/desktop/node_modules/delta-dsh` 指向本仓库；禁用/启用可反复加载（路由与命令在进程内不冲突）。
 - band 数据链路：`GET /delta-dsh-api/status?session=<live>` → 200，真实返回 Delta 的绘制树：先是 “○ Delta · Not set up /delta-setup”，setup 完成后同一会话返回 “● Delta · Syncing”、真实 `https://delta.dev/join/thread_…` 链接、`Synced with Zed VIP`，以及 copy link / Share 按钮（按钮闭包含 generation/actionId）。
 - 真实 Delta 账号：插件在本机 desktop profile 运行、`/delta-setup` 向导经 DSH 提问完成并把 `{"threads":{"mode":"private","organization":"…"}}` 写入仓库 `.delta/settings.json`；Delta CLI 自动创建 thread 并在 `$DSH_HOME/delta-dsh/claude/delta-plugin/outbox/<session>` 持续暂存记录（实测 869 个记录文件）；`delta --json thread show <thread>` 能读到本会话 prompt 原文。即：自动同步、录制、CLI 集成、setup 向导在本机真实链路跑通。
 - 兼容：`delta --json thread contract` = min 8/max 9，插件按 max 8 协商；`delta auth status`/`org list` 经 shim 解析正常。
+- 按会话甄别：`POST /delta-dsh-api/focus`（当前 Lead 会话）→ 200，随后 `GET /status` 返回真实 band 绘制；另外 3 个未聚焦 root 会话 `GET /status` 均 `tree:null`（隐藏）。
 
 ### 未验证
 - GUI 中 band 的实际渲染与按钮点击（`lib/client.js` 由 Harness Client 模块系统在 Host 启动时装载，本次运行的 Host 早于安装，未重启；未在页面复测）。
-- 并发多 Session：同一 Host 内多个 root Session（本次 Team 场景有 4 个）共享 Delta 的单活动会话状态（activation/watch/band 为模块级单例），band 只在最后激活的 Session 上可见；单 Session 主流程已实测，多 Session 隔离未实现（见 §4.6）。
+- 多 Session 跟随：已实现“跟随当前视图”的方式（focus 后 activation/watch/band 移到该 Session，其余隐藏），本机实测聚焦会话出 band、未聚焦隐藏；但 Delta 一次只激活一个 Session，切走期间该会话暂停录制，这是上游单活动会话设计的直接结果。
 - share 受众选择与 publish/invite、join（mount/cd/重连）、watch/presence 的人机交互部分；Windows；`ui.copy` 剪贴板；Fork & Restore/Discard；插件更新通知行；提问卡片的自由输入。
 
 ### 未验证
@@ -111,4 +114,4 @@
 3. **用户可见文案仍是 Claude Code**：菜单/向导文案来自未改的 vendored 代码（`vendor/delta/setup/commands.ts:41-50`、`setup/setup.ts`）；产品上需决定是否改写。
 4. **README 与代码一致性**：README 已补 `/delta-plugin-update notifications on|off`。
 5. **构建产物**：`lib/` 为 esbuild 产物；改 `src/` 或重新 `sync-delta` 后必须重跑 `node scripts/build.mjs`。
-6. **并发多 Session 未隔离**：Delta 的 activation/watch/band 是模块级单例（上游按“一进程一 Claude 会话”设计），本端口在单 Session 下实测正常；同进程多 root Session 时只有最后激活者拥有 band/watch，录制按 binding 分 Session 但仍共享单例状态。
+6. **多 Session 采用“跟随视图”而非并行录制**：Delta 的 activation/watch/band 是模块级单例（上游按“一进程一 Claude 会话”设计）。本端口让 client 打开会话时 focus 该 Session（`POST /delta-dsh-api/focus`），Host 迁移 activation/watch；未聚焦会话不录制、无 band（仅保留命令菜单）。若需要后台会话持续录制，需要重构上游单例状态，v1 不做。
