@@ -62,23 +62,19 @@ commands stay intact.
 
 The Claude Code plugin runs one process per Session, so every Session it sees
 gets a Delta status bar. A Harness Host runs every root Session in one process,
-so the port discriminates on three levels:
+so the port discriminates:
 
-1. **Which Sessions Delta follows.** Delta's hooks keep one active Session per
-   process, so the port follows the Session you are viewing: opening a
-   conversation moves Delta's activation, recording and thread watch to it, and
-   leaves the previously viewed Session without a band. Every user-facing
-   Session still gets the `/delta` command menu, so `/delta-share` works from
-   any conversation. Agent-internal Sessions are never served: Team teammates
-   and subagent children get no Delta start, no questions, and no status bar.
-2. **When the band shows at all.** Only when Delta has something to say about
-   the viewed Session: it has a thread (shared, synced, or joined), a join or
-   upload in flight, a running Delta operation or watch failure, or its checkout
-   has a deliberate `.delta/settings.json` policy (the "manual" reminder). A
-   checkout Delta was never set up in stays quiet; `/delta-setup` and
-   `/delta-share` remain one command away.
-3. **When it shows a reminder.** A Session in a configured checkout with no
-   thread shows Delta's own nudge toward `/delta-share` in manual mode.
+1. **Which Sessions Delta serves.** Every user-facing Session gets the `/delta`
+   command menu, but Delta records and connects only when a Delta command (or a
+   Session the person already shared/joined before) asks for it. Team teammates
+   and subagent children are never served: no Delta start, no questions, no
+   status bar.
+2. **When the band shows.** Only for a Session the person explicitly connected to
+   Delta: it has a Delta thread from `/delta-share` or `/delta-join`, or a Delta
+   command is in flight, or such a connection is failing and needs attention.
+   A Session that was never set up — or that only has a local capture — shows no
+   bar at all: no "not set up" reminder, no "not syncing" nudge. `/delta-setup`
+   and `/delta-share` are always one command away in the composer menu.
 
 ## The band
 

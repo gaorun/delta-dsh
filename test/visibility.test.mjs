@@ -50,21 +50,18 @@ test('the person-facing Sessions are root and not Team teammates', () => {
   assert.equal(isUserFacingSession(undefined, undefined), false)
 })
 
-test('the band shows only when Delta has something to say', () => {
-  const base = { userFacing: true, configured: false, progress: false, watchError: false }
-  // A checkout Delta was never used in stays quiet; setup/share are a command away.
+test('the band shows only for a Session connected to Delta', () => {
+  const base = { userFacing: true, progress: false, watchError: false }
+  // Never connected: no "not set up" reminder, no bar.
   assert.equal(bandShouldShow({ ...base, binding: undefined }), false)
-  // A configured checkout shows its manual reminder even without a binding.
-  assert.equal(bandShouldShow({ ...base, binding: undefined, configured: true }), true)
-  // A shared/synced/joined thread always shows.
+  // A local-only capture binding (snapshot) is not a connection.
+  assert.equal(bandShouldShow({ ...base, binding: { snapshot: true } }), false)
+  // Connected: shared, joined, joining, or synced.
   for (const binding of [{ thread: 't' }, { joined: true }, { joinTransition: {} }, { autoUpload: { mode: 'private' } }])
     assert.equal(bandShouldShow({ ...base, binding }), true)
-  // Running operations and watch failures show even before the thread exists.
+  // A Delta command in flight, or a connection it started that now fails, shows.
   assert.equal(bandShouldShow({ ...base, binding: undefined, progress: true }), true)
   assert.equal(bandShouldShow({ ...base, binding: undefined, watchError: true }), true)
-  // A plain binding with a local-only capture shows only in a configured checkout.
-  assert.equal(bandShouldShow({ ...base, binding: { snapshot: true } }), false)
-  assert.equal(bandShouldShow({ ...base, binding: { snapshot: true }, configured: true }), true)
   // Agent-internal Sessions never show it.
   assert.equal(bandShouldShow({ ...base, userFacing: false, binding: { thread: 't' } }), false)
 })

@@ -356,7 +356,6 @@ export class Bridge {
     return bandShouldShow({
       userFacing,
       binding: await this.bindingOf(session),
-      configured: repoPolicyConfigured(this.cwdOf(session)),
       progress,
       watchError,
     })
