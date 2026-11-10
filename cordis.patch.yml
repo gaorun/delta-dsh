@@ -1,0 +1,7 @@
+# Delta for DeepSeek Harness: record and share Sessions and code through DeltaDB.
+# The Host half provides the /delta command family, Session recording, the band's
+# data, and the same-origin delta-dsh API. The browser half (lib/client.js) is
+# declared by package.json's dsh.client and draws the band above the composer.
+- insert:
+    - id: delta-dsh
+      name: 'delta-dsh'

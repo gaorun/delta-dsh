@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Delta",
+    "description": "把 Harness 会话录制到 DeltaDB，与团队共享、加入他人的会话线程，并同步代码检出。"
+  }
+}

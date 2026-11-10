@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Delta",
+    "description": "Record a Harness Session to DeltaDB, share it with a team, join someone else's thread, and keep the code checkout in sync."
+  }
+}
