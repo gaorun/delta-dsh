@@ -300,7 +300,9 @@ export class Bridge {
       // activation runs (Delta stops the conversation it was watching).
       if (previous !== undefined) this.hub.publish(previous, null)
     }
-    if (this.activated.has(sessionId)) {
+    // Another Session's activation may have taken Delta's single active slot since
+    // this one started; the focused Session must be the active one to draw.
+    if (activation.session === sessionId) {
       this.redrawFocused(sessionId)
       return
     }
@@ -315,10 +317,15 @@ export class Bridge {
     await this.engine.dispatch('session.start', Object.freeze({ cwd, surface: 'terminal', isInteractive: true }),
       async () => ({ cwd }), { agent, session, signal: new AbortController().signal })
     // Delta's session.start catches its own activation failures, so mark the start
-    // complete only once Delta really holds this Session (a binding or progress).
-    // Otherwise the browser's retry (or the next focus) dispatches it again.
+    // complete only once Delta really holds this Session: a loaded binding, and a
+    // thread whose watch is live (or starting). Otherwise the browser's retry (or
+    // the next focus) dispatches it again.
     const runtime = deltaSessions.get(sessionId)
-    if (runtime?.binding !== undefined || reportedProgress() !== undefined) {
+    const binding = runtime?.binding
+    const watch = watchStatus()?.actual
+    const healthy = binding !== undefined &&
+      (binding.thread === undefined || watch === 'live' || watch === 'connecting' || reportedProgress() !== undefined)
+    if (healthy) {
       this.activated.add(sessionId)
       this.focusAttempts.delete(sessionId)
     } else {

@@ -41,16 +41,19 @@ await build({
 })
 
 /**
- * Inline the Chinese band copy into the browser wrapper: the Client module
- * system loads one self-contained file, so it cannot import a sibling module.
- * `src/band-i18n.js` stays an ordinary ESM module for its unit test; the build
- * strips its exports and substitutes it at the wrapper's placeholder.
+ * Inline the browser-side helper modules into the wrapper: the Client module
+ * system loads one self-contained file, so it cannot import siblings. Each
+ * helper stays an ordinary ESM module for its unit test; the build strips its
+ * exports and substitutes the concatenation at the wrapper's placeholder.
  */
-const bandI18n = (await readFile(join(plugin, 'src', 'band-i18n.js'), 'utf8'))
-  .replace(/^export /gm, '')
-  .trim()
+const HELPERS = ['band-i18n.js', 'band-visibility.js']
+const inlined = []
+for (const helper of HELPERS) {
+  const source = (await readFile(join(plugin, 'src', helper), 'utf8')).replace(/^export /gm, '').trim()
+  inlined.push(source.split('\n').map((line) => `    ${line}`).join('\n'))
+}
 const client = await readFile(join(plugin, 'src', 'client.js'), 'utf8')
-const placeholder = '    /*__BAND_I18N__*/'
-if (!client.includes(placeholder)) throw new Error('src/client.js is missing the band-i18n placeholder')
-await writeFile(join(lib, 'client.js'), client.replace(placeholder, bandI18n.split('\n').map((line) => `    ${line}`).join('\n')), 'utf8')
-console.log('lib/client.js built from src/client.js + src/band-i18n.js')
+const placeholder = '    /*__BAND_HELPERS__*/'
+if (!client.includes(placeholder)) throw new Error('src/client.js is missing the band helpers placeholder')
+await writeFile(join(lib, 'client.js'), client.replace(placeholder, inlined.join('\n\n')), 'utf8')
+console.log(`lib/client.js built from src/client.js + ${HELPERS.join(', ')}`)

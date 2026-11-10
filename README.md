@@ -65,6 +65,10 @@ so the port discriminates on three levels:
 
 ## The band
 
+The band hides a failure line that carries no actionable detail (Delta's
+generic "Not syncing: Fix the cause" advice); a specific failure reason, a
+link, a person or a button still draws.
+
 Band copy follows the Harness language. With a Chinese UI the hint text is
 translated — status labels, buttons, progress steps, audience, update rows — while
 proper nouns stay as written: Delta, DeltaDB, team names, people's names, links,
@@ -100,7 +104,7 @@ context. The browser half is loaded by the Harness Client module system.
 
 ```sh
 cd delta-dsh
-npm install            # esbuild, for the build only
+npm install            # esbuild, for the build only (registry: see .npmrc)
 node scripts/sync-delta.mjs   # copy ../hooks -> vendor/delta and re-apply the documented patches
 node scripts/build.mjs        # src/ + vendor/ -> lib/index.js, src/client.js -> lib/client.js
 node --test test/*.test.mjs   # engine, rows, surfaces, process and a fake-context smoke test
@@ -151,6 +155,12 @@ the network. The smoke test loads `lib/index.js`, so run `build` first.
   `/delta-update` still updates the Delta app and CLI through Delta's own code.
 - Windows-specific install and update orchestration keeps Delta's code but is
   untested here.
+
+## Registry
+
+`.npmrc` pins this package to the official npm registry
+(`https://registry.npmjs.org/`); `package-lock.json` resolves from it. The
+build-time dependency is esbuild only.
 
 ## License
 

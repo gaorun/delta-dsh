@@ -11,7 +11,7 @@
 window.__ModuleLoader__.load({
   id: 'delta-dsh',
   factory: (require) => {
-    /*__BAND_I18N__*/
+    /*__BAND_HELPERS__*/
     const module = { exports: {} }
     const exports = module.exports
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
@@ -40,6 +40,7 @@ window.__ModuleLoader__.load({
     // the window edge instead of the input box's left edge.
     const css = `
 .dsd-dock{box-sizing:border-box;width:calc(100% - 2 * var(--dsh-composer-side-clearance, 0px) - 4 * var(--dsh-composer-dock-inset, 0px));margin:0 auto}
+.dsd-idle{height:0;margin:0;padding:0}
 .dsd-band{box-sizing:border-box;width:100%;max-width:calc(var(--dsh-composer-card-max-width, 100%) - 4 * var(--dsh-composer-dock-inset, 0px));margin:0 auto 4px;padding:6px 10px;border-radius:8px;
  background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary);
  font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px;white-space:pre-wrap}
@@ -145,9 +146,30 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dsd-box', style, ...attributes }, ...children)
     }
 
+    /** Whether this dock's element is actually laid out and the window visible. */
+    function isDockVisible(element) {
+      if (element === null || element === undefined || typeof document === 'undefined' || document.hidden) return false
+      if (typeof element.offsetParent !== 'undefined' && element.offsetParent !== null) return true
+      return typeof element.getClientRects === 'function' && element.getClientRects().length > 0
+    }
+
     /** The band above the prompt: the Host's current drawing and its buttons. */
-    function Band({ useBand, press, t, language }) {
+    function Band({ useBand, press, t, language, watch }) {
       const snapshot = useBand((value) => value)
+      const dockRef = React.useRef(null)
+      React.useEffect(() => {
+        if (watch === undefined) return undefined
+        const update = () => {
+          if (isDockVisible(dockRef.current)) watch.start()
+          else watch.stop()
+        }
+        update()
+        const timer = setInterval(update, 500)
+        return () => {
+          clearInterval(timer)
+          watch.stop()
+        }
+      }, [watch])
       const currentLanguage = typeof language === 'function' ? language() : language
       const tr = (text) => translateBandText(text, currentLanguage)
       const [pending, setPending] = React.useState(undefined)
@@ -164,8 +186,10 @@ window.__ModuleLoader__.load({
           },
         )
       }, [press, t, snapshot?.generation])
-      if (snapshot === undefined || snapshot.tree === null) return null
-      return h('div', { className: 'dsd-dock' },
+      const idle = h('div', { className: 'dsd-dock dsd-idle', ref: dockRef })
+      if (snapshot === undefined || snapshot.tree === null) return idle
+      if (isGenericFailureBand(snapshot.tree)) return idle
+      return h('div', { className: 'dsd-dock', ref: dockRef },
         h('div', { className: 'dsd-band', role: 'group', 'aria-label': t('band'), 'data-generation': snapshot.generation },
           ...snapshot.tree.map((node, index) => h(Node, { key: `${snapshot.generation}.${index}`, node, pending, onPress, tr })),
           snapshot.status ? h('div', { className: 'dsd-status' }, tr(snapshot.status)) : null,
@@ -195,10 +219,16 @@ window.__ModuleLoader__.load({
      * Keep one session's store fed by polling the Host's snapshot, and allow
      * presses. The Harness web server finishes a prefix route's response when
      * its handler returns, so the band polls instead of holding an event stream.
+     *
+     * Polling follows the dock's visibility: every mounted Conversation keeps
+     * its band component, so an off-screen one must neither poll nor focus its
+     * Session — otherwise tabs would steal Delta's single active Session from
+     * each other.
      */
     function watchSession(sessionId) {
       const store = new BandStore()
       let closed = false
+      let started = false
       let timer
       let generation = -1
       let lastFocus = 0
@@ -209,17 +239,16 @@ window.__ModuleLoader__.load({
           store.set(snapshot)
         }
       }
-      // Tell the Host this is the Session the person is looking at: Delta follows
-      // one Session at a time, so opening a conversation moves the band (and the
-      // thread watch) to it.
-      lastFocus = Date.now()
-      fetch(`${BASE}/focus`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ session: sessionId }),
-      }).catch(() => {})
+      const focus = () => {
+        lastFocus = Date.now()
+        fetch(`${BASE}/focus`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ session: sessionId }),
+        }).catch(() => {})
+      }
       const poll = async () => {
-        if (closed) return
+        if (closed || !started) return
         try {
           const response = await fetch(`${BASE}/status?session=${encodeURIComponent(sessionId)}`, {
             headers: { accept: 'application/json' },
@@ -230,19 +259,11 @@ window.__ModuleLoader__.load({
             apply(snapshot)
             // A dock can mount before its Session's agent exists; while the band
             // is empty, ask the Host to focus this Session again (throttled).
-            if ((snapshot === null || snapshot.tree === null) && Date.now() - lastFocus > 5_000) {
-              lastFocus = Date.now()
-              fetch(`${BASE}/focus`, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ session: sessionId }),
-              }).catch(() => {})
-            }
+            if ((snapshot === null || snapshot.tree === null) && Date.now() - lastFocus > 5_000) focus()
           }
         } catch {}
-        if (!closed) timer = setTimeout(poll, 700)
+        if (started && !closed) timer = setTimeout(poll, 700)
       }
-      void poll()
       const press = async (pressedGeneration, actionId) => {
         const response = await fetch(`${BASE}/band/press`, {
           method: 'POST',
@@ -257,6 +278,18 @@ window.__ModuleLoader__.load({
       return {
         store,
         press,
+        /** The dock is on screen: focus its Session and keep the band fed. */
+        start() {
+          if (closed || started) return
+          started = true
+          focus()
+          void poll()
+        },
+        /** The dock left the screen: stop polling so it cannot steal focus. */
+        stop() {
+          started = false
+          clearTimeout(timer)
+        },
         dispose() {
           closed = true
           clearTimeout(timer)
@@ -288,6 +321,7 @@ window.__ModuleLoader__.load({
         inject: (sessionId) => ({
           hooks: { band: watchOf(sessionId).store },
           press: (generation, actionId) => watchOf(sessionId).press(generation, actionId),
+          watch: watchOf(sessionId),
           language: () => {
             try { return locale.getLocale().active } catch { return 'en' }
           },
