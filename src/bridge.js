@@ -20,7 +20,7 @@ import { reportedProgress } from '../vendor/delta/band/band.tsx'
 import { watchStatus, watchedSession } from '../vendor/delta/watch/watch.ts'
 import { activation, sessions as deltaSessions } from '../vendor/delta/core/session-state.ts'
 import { apiBlocks } from './rows.js'
-import { bandShouldShow, isUserFacingSession, repoPolicyConfigured, shouldAutoActivate } from './visibility.js'
+import { bandShouldShow, isUserFacingSession, repoPolicyConfigured } from './visibility.js'
 import { translateDialog, translateQuestion } from './dialog-i18n.js'
 
 /** CLI names for Harness tool names, so Delta's tool-call rows keep their Claude titles. */
@@ -119,10 +119,6 @@ export class Bridge {
     this.focusedSession = undefined
     /** The browser's active locale, for Delta's own question dialogs. */
     this.language = 'en'
-    /** Sessions whose Delta start has completed in this process. */
-    this.activated = new Set()
-    /** Focus attempts per Session, for retrying a start Delta did not take. */
-    this.focusAttempts = new Map()
     try {
       this.packageVersionValue = JSON.parse(readFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version
     } catch {
@@ -295,65 +291,23 @@ export class Bridge {
    * hooks keep one active Session per process, so switching the focused Session
    * switches Delta's activation with it.
    */
+  /**
+   * The person opened a Session. Delta's command menu is always available, but the
+   * port never connects to Delta here: a Session start, a setup offer or a
+   * sign-in dialog must follow an explicit `/delta-setup`, `/delta-share` or
+   * `/delta-join`. Recording and the thread watch begin with those commands.
+   */
   async focus(sessionId, language) {
     if (typeof language === 'string' && /^[a-z]{2}/i.test(language)) this.language = language
     if (this.focusedSession !== sessionId) {
       const previous = this.focusedSession
       this.focusedSession = sessionId
-      // Hide the previous session's band immediately; its watch stops when the new
-      // activation runs (Delta stops the conversation it was watching).
       if (previous !== undefined) this.hub.publish(previous, null)
-    }
-    // Another Session's activation may have taken Delta's single active slot since
-    // this one started; the focused Session must be the active one to draw.
-    if (activation.session === sessionId) {
-      this.redrawFocused(sessionId)
-      return
     }
     let agent
     try { agent = this.ctx.agents?.get?.(sessionId) } catch {}
-    // The dock can mount before the Session's agent is registered; agent/created
-    // (or the browser's next retry) finishes the focus.
     if (agent === undefined || !this.isUserFacing(agent)) return
-    const session = agent.session
     await this.ensureCommands(agent)
-    const cwd = this.cwdOf(session)
-    // A checkout nobody set up stays offline: no setup offer, no sign-in dialog,
-    // no Delta connection. `/delta-setup`, `/delta-share` and `/delta-join` connect
-    // when the person asks.
-    if (!shouldAutoActivate(repoPolicyConfigured(cwd))) {
-      this.redrawFocused(sessionId)
-      return
-    }
-    await this.engine.dispatch('session.start', Object.freeze({ cwd, surface: 'terminal', isInteractive: true }),
-      async () => ({ cwd }), { agent, session, signal: new AbortController().signal })
-    // Delta's session.start catches its own activation failures, so mark the start
-    // complete only once Delta really holds this Session: a loaded binding, and a
-    // thread whose watch is live (or starting). Otherwise the browser's retry (or
-    // the next focus) dispatches it again.
-    const runtime = deltaSessions.get(sessionId)
-    const binding = runtime?.binding
-    const watch = watchStatus()?.actual
-    const healthy = binding !== undefined &&
-      (binding.thread === undefined || watch === 'live' || watch === 'connecting' || reportedProgress() !== undefined)
-    if (healthy) {
-      this.activated.add(sessionId)
-      this.focusAttempts.delete(sessionId)
-    } else {
-      // Retry a start Delta did not take, a few times, without needing a browser.
-      const attempts = (this.focusAttempts.get(sessionId) ?? 0) + 1
-      this.focusAttempts.set(sessionId, attempts)
-      if (attempts <= 5) {
-        const timer = setTimeout(() => {
-          this.active.delete(clear)
-          void this.focus(sessionId).catch(() => {})
-        }, 4_000)
-        timer.unref?.()
-        const clear = () => clearTimeout(timer)
-        this.active.add(clear)
-      }
-    }
-    this.invalidateBand({ agent, session })
     this.redrawFocused(sessionId)
   }
 
@@ -413,7 +367,6 @@ export class Bridge {
     const runtime = deltaSessions.get(sessionId)
     const state = {
       focused: this.isFocused(sessionId),
-      activated: this.activated.has(sessionId),
       userFacing: this.isUserFacing(agent),
       configured: false,
       binding: undefined,

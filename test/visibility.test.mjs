@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bandShouldShow, findRepoRoot, isUserFacingSession, repoPolicyConfigured, shouldAutoActivate } from '../src/visibility.js'
+import { bandShouldShow, findRepoRoot, isUserFacingSession, repoPolicyConfigured } from '../src/visibility.js'
 
 async function policyRepo(policy) {
   const root = await mkdtemp(join(tmpdir(), 'delta-dsh-policy-'))
@@ -48,12 +48,6 @@ test('the person-facing Sessions are root and not Team teammates', () => {
   assert.equal(isUserFacingSession(root, { role: 'teammate' }), false)
   assert.equal(isUserFacingSession(child, { role: 'lead' }), false)
   assert.equal(isUserFacingSession(undefined, undefined), false)
-})
-
-test('only a deliberately configured checkout connects on its own', async () => {
-  assert.equal(shouldAutoActivate(repoPolicyConfigured(await policyRepo({ threads: { mode: 'private' } }))), true)
-  assert.equal(shouldAutoActivate(repoPolicyConfigured(await policyRepo(undefined))), false)
-  assert.equal(shouldAutoActivate(repoPolicyConfigured(await mkdtemp(join(tmpdir(), 'delta-dsh-plain-')))), false)
 })
 
 test('the band shows only when Delta has something to say', () => {

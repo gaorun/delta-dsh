@@ -43,12 +43,15 @@ writes `.delta/settings.json` and keeps that file out of Git.
 
 ## When Delta connects
 
-Opening a Session never connects to Delta on its own. A checkout Delta was
-deliberately set up in (`.delta/settings.json`) follows that setting, including
-automatic sync; a checkout that was never set up stays completely offline — no
-setup offer, no sign-in dialog, no Delta CLI call — until you run `/delta-setup`,
-`/delta-share` or `/delta-join`. The port also never offers setup on its own:
-`/delta-setup` is the only way into the wizard.
+Opening a Session never connects to Delta. The port does not start recording,
+does not contact the Delta CLI, does not offer setup and does not ask anyone to
+sign in until you run `/delta-setup`, `/delta-share` or `/delta-join`. The
+`/delta` command menu is always present.
+
+That also means the automatic sync modes a repository's `.delta/settings.json`
+can name do not make new Sessions sync by themselves in this port: the file is
+still read for the repository's team and as the default audience, and every
+sync or share starts from an explicit Delta command.
 
 Dialog copy follows the Harness language too: the setup wizard, share audience
 and sign-in questions are translated (Chinese when the UI is Chinese) and the
