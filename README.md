@@ -113,6 +113,19 @@ records and applies the only two edits (the in-place join transition). Never edi
 The Host tests fake the Harness context, so they never install, spawn, or touch
 the network. The smoke test loads `lib/index.js`, so run `build` first.
 
+## Troubleshooting
+
+- **The band is missing after the Harness app restarts.** Delta follows the
+  Session the page shows, and the page can mount before that Session's agent is
+  registered. The browser re-asks every few seconds while the band is empty, and
+  the Host retries a start Delta did not take, so it recovers on its own; if the
+  page was served before this plugin was updated, refresh it once to load the
+  current browser half.
+- **Diagnose an empty band.** Ask the Host for the drawn state of one Session:
+  `GET /delta-dsh-api/status?session=<id>`. A `tree` is what the band draws; a
+  `null` tree with a `debug` object names the reason (`unfocused`, `hidden`,
+  `no-session`) and Delta's activation facts.
+
 ## Known limits (v1)
 
 - The browser half is registered from the installed package, so a Harness Host

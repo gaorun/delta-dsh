@@ -88,7 +88,10 @@ export function apply(ctx) {
     const { agent } = payload
     if (agent?.session === undefined || !isRootSession(agent.session) || !bridge.isUserFacing(agent)) return
     await bridge.ensureCommands(agent)
-    if (userFacingRoots().length === 1) await bridge.focus(String(agent.session.id))
+    // Finish a focus the browser asked for before this agent existed, or pick the
+    // only open Session when nobody has asked yet.
+    if (bridge.isFocused(String(agent.session.id)) || userFacingRoots().length === 1)
+      await bridge.focus(String(agent.session.id))
   })
 
   // A root session ending: Delta finishes its turn bookkeeping and cleans up.

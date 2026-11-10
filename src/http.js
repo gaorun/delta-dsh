@@ -57,7 +57,9 @@ export function registerBandRoutes(ctx, { hub, draw, focus, base = '/delta-dsh-a
           await draw(session)
           const snapshot = hubOf().current(session)
           const error = hubOf().lastDrawError
-          return sendJson(res, 200, error === undefined ? snapshot : { ...snapshot, error })
+          const result = error === undefined ? { ...snapshot } : { ...snapshot, error }
+          if (snapshot.tree === null && hubOf().lastDrawDebug !== undefined) result.debug = hubOf().lastDrawDebug
+          return sendJson(res, 200, result)
         }
         if (rest === '/focus' && req.method === 'POST') {
           const body = JSON.parse(await readBody(req, 4 * 1024))

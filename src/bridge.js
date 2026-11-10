@@ -116,6 +116,10 @@ export class Bridge {
     this.questionSequence = 0
     this.userFacing = new WeakMap()
     this.focusedSession = undefined
+    /** Sessions whose Delta start has completed in this process. */
+    this.activated = new Set()
+    /** Focus attempts per Session, for retrying a start Delta did not take. */
+    this.focusAttempts = new Map()
     try {
       this.packageVersionValue = JSON.parse(readFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version
     } catch {
@@ -289,21 +293,57 @@ export class Bridge {
    * switches Delta's activation with it.
    */
   async focus(sessionId) {
-    if (this.focusedSession === sessionId) return
-    const previous = this.focusedSession
-    this.focusedSession = sessionId
-    // Hide the previous session's band immediately; its watch stops when the new
-    // activation runs (Delta stops the conversation it was watching).
-    if (previous !== undefined) this.hub.publish(previous, null)
+    if (this.focusedSession !== sessionId) {
+      const previous = this.focusedSession
+      this.focusedSession = sessionId
+      // Hide the previous session's band immediately; its watch stops when the new
+      // activation runs (Delta stops the conversation it was watching).
+      if (previous !== undefined) this.hub.publish(previous, null)
+    }
+    if (this.activated.has(sessionId)) {
+      this.redrawFocused(sessionId)
+      return
+    }
     let agent
     try { agent = this.ctx.agents?.get?.(sessionId) } catch {}
+    // The dock can mount before the Session's agent is registered; agent/created
+    // (or the browser's next retry) finishes the focus.
     if (agent === undefined || !this.isUserFacing(agent)) return
     const session = agent.session
     await this.ensureCommands(agent)
     const cwd = this.cwdOf(session)
     await this.engine.dispatch('session.start', Object.freeze({ cwd, surface: 'terminal', isInteractive: true }),
       async () => ({ cwd }), { agent, session, signal: new AbortController().signal })
+    // Delta's session.start catches its own activation failures, so mark the start
+    // complete only once Delta really holds this Session (a binding or progress).
+    // Otherwise the browser's retry (or the next focus) dispatches it again.
+    const runtime = deltaSessions.get(sessionId)
+    if (runtime?.binding !== undefined || reportedProgress() !== undefined) {
+      this.activated.add(sessionId)
+      this.focusAttempts.delete(sessionId)
+    } else {
+      // Retry a start Delta did not take, a few times, without needing a browser.
+      const attempts = (this.focusAttempts.get(sessionId) ?? 0) + 1
+      this.focusAttempts.set(sessionId, attempts)
+      if (attempts <= 5) {
+        const timer = setTimeout(() => {
+          this.active.delete(clear)
+          void this.focus(sessionId).catch(() => {})
+        }, 4_000)
+        timer.unref?.()
+        const clear = () => clearTimeout(timer)
+        this.active.add(clear)
+      }
+    }
     this.invalidateBand({ agent, session })
+    this.redrawFocused(sessionId)
+  }
+
+  /** Redraw the focused Session's band, when its agent still exists. */
+  redrawFocused(sessionId) {
+    let agent
+    try { agent = this.ctx.agents?.get?.(sessionId) } catch {}
+    if (agent?.session !== undefined) this.invalidateBand({ agent, session: agent.session })
   }
 
   /** Announce one Session's band to an open browser (the Client calls this when its dock mounts). */
@@ -349,6 +389,34 @@ export class Bridge {
     })
   }
 
+  /** Why the band drew nothing, for the status endpoint's diagnostics (no user data). */
+  bandDiagnostics(sessionId, agent, session) {
+    const runtime = deltaSessions.get(sessionId)
+    const state = {
+      focused: this.isFocused(sessionId),
+      activated: this.activated.has(sessionId),
+      userFacing: this.isUserFacing(agent),
+      configured: false,
+      binding: undefined,
+      thread: false,
+      progress: reportedProgress() !== undefined,
+      watchError: watchStatus()?.error,
+      watched: watchedSession() ?? null,
+      activation: activation.session,
+      reminder: runtime?.reminder,
+      snapshot: runtime?.binding?.snapshot,
+      watch: watchStatus()?.actual,
+    }
+    try {
+      state.configured = repoPolicyConfigured(this.cwdOf(session))
+    } catch {}
+    void this.bindingOf(session).then((binding) => {
+      state.binding = binding !== undefined
+      state.thread = binding?.thread !== undefined
+    }).catch(() => {})
+    return state
+  }
+
   /** Redraw one session's band from Delta's own hooks and publish it to the Client. */
   async drawBand(sessionId) {
     let agent
@@ -358,14 +426,17 @@ export class Bridge {
       try { session = this.ctx.get?.('sessions')?.get?.(sessionId) } catch {}
     }
     if (session === undefined) {
+      this.hub.lastDrawDebug = { reason: 'no-session' }
       this.hub.dispose(sessionId)
       return
     }
     if (!this.isFocused(sessionId)) {
+      this.hub.lastDrawDebug = { reason: 'unfocused', focused: this.focusedSession ?? null }
       this.hub.publish(sessionId, null)
       return
     }
     if (!(await this.bandShouldShow(agent, session))) {
+      this.hub.lastDrawDebug = { reason: 'hidden', ...this.bandDiagnostics(sessionId, agent, session) }
       this.hub.publish(sessionId, null)
       return
     }
@@ -389,6 +460,7 @@ export class Bridge {
       this.logger.warn(`delta-dsh: band draw failed: ${this.hub.lastDrawError}`)
       result = null
     }
+    if (result === null || result === undefined) this.hub.lastDrawDebug = this.bandDiagnostics(sessionId, agent, session)
     this.hub.publish(sessionId, result ?? null)
   }
 

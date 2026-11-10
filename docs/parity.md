@@ -94,7 +94,7 @@
 - band 数据链路：`GET /delta-dsh-api/status?session=<live>` → 200，真实返回 Delta 的绘制树：先是 “○ Delta · Not set up /delta-setup”，setup 完成后同一会话返回 “● Delta · Syncing”、真实 `https://delta.dev/join/thread_…` 链接、`Synced with Zed VIP`，以及 copy link / Share 按钮（按钮闭包含 generation/actionId）。
 - 真实 Delta 账号：插件在本机 desktop profile 运行、`/delta-setup` 向导经 DSH 提问完成并把 `{"threads":{"mode":"private","organization":"…"}}` 写入仓库 `.delta/settings.json`；Delta CLI 自动创建 thread 并在 `$DSH_HOME/delta-dsh/claude/delta-plugin/outbox/<session>` 持续暂存记录（实测 869 个记录文件）；`delta --json thread show <thread>` 能读到本会话 prompt 原文。即：自动同步、录制、CLI 集成、setup 向导在本机真实链路跑通。
 - 兼容：`delta --json thread contract` = min 8/max 9，插件按 max 8 协商；`delta auth status`/`org list` 经 shim 解析正常。
-- 按会话甄别：`POST /delta-dsh-api/focus`（当前 Lead 会话）→ 200，随后 `GET /status` 返回真实 band 绘制；另外 3 个未聚焦 root 会话 `GET /status` 均 `tree:null`（隐藏）。
+- 按会话甄别：`POST /delta-dsh-api/focus`（当前 Lead 会话）→ 200，随后 `GET /status` 返回真实 band 绘制；另外 3 个未聚焦 root 会话 `GET /status` 均 `tree:null`（隐藏）。Host 重启后：client 在 band 为空时每 5s 重发 focus，Host 对未真正接管的启动每 4s 重试（最多 5 次），`GET /status` 的 `debug` 字段给出 `unfocused`/`hidden`/`no-session` 原因。
 
 ### 未验证
 - GUI 中 band 的实际渲染与按钮点击（`lib/client.js` 由 Harness Client 模块系统在 Host 启动时装载，本次运行的 Host 早于安装，未重启；未在页面复测）。

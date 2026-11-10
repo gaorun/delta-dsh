@@ -201,6 +201,7 @@ window.__ModuleLoader__.load({
       let closed = false
       let timer
       let generation = -1
+      let lastFocus = 0
       const apply = (snapshot) => {
         if (snapshot === null || typeof snapshot !== 'object') return
         if (snapshot.generation !== generation) {
@@ -211,6 +212,7 @@ window.__ModuleLoader__.load({
       // Tell the Host this is the Session the person is looking at: Delta follows
       // one Session at a time, so opening a conversation moves the band (and the
       // thread watch) to it.
+      lastFocus = Date.now()
       fetch(`${BASE}/focus`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -223,7 +225,20 @@ window.__ModuleLoader__.load({
             headers: { accept: 'application/json' },
             cache: 'no-store',
           })
-          if (response.ok) apply(await response.json())
+          if (response.ok) {
+            const snapshot = await response.json()
+            apply(snapshot)
+            // A dock can mount before its Session's agent exists; while the band
+            // is empty, ask the Host to focus this Session again (throttled).
+            if ((snapshot === null || snapshot.tree === null) && Date.now() - lastFocus > 5_000) {
+              lastFocus = Date.now()
+              fetch(`${BASE}/focus`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ session: sessionId }),
+              }).catch(() => {})
+            }
+          }
         } catch {}
         if (!closed) timer = setTimeout(poll, 700)
       }
